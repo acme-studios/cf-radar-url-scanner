@@ -18,7 +18,7 @@
 		{
 			"binding": "radar_scanner_db",
 			"database_name": "radar-scanner-db",
-			"database_id": "c5afdb81-93d4-4fd7-8020-a7cc34a745b2"
+			"database_id": "<DATABASE_ID>"
 		}
 	],
 	"r2_buckets": [
@@ -44,8 +44,8 @@
 		}
 	],
 	"vars": {
-		"CLOUDFLARE_ACCOUNT_ID": "2fa27fc2efb43de71442d46a603cc8d2",
-		"APP_URL": "https://radar-url-scanner.workers.dev"
+		"CLOUDFLARE_ACCOUNT_ID": "<CLOUDFLARE_ACCOUNT_ID>",
+		"APP_URL": "<APP_URL>"
 	},
 	"placement": {
 		"mode": "smart"
