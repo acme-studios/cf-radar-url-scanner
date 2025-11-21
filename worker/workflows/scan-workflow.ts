@@ -72,7 +72,6 @@ export class ScanWorkflow extends WorkflowEntrypoint<Env, ScanParams> {
       });
       
       // Step 3: Poll for scan results
-      // @ts-expect-error - Workflow serialization constraint, result is actually serializable
       const scanResult = (await step.do('poll for scan results', async () => {
         const maxAttempts = 40; // 10 minutes max (15s intervals)
         const pollInterval = '15 seconds';

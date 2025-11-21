@@ -31,11 +31,16 @@
 		"bindings": [
 			{
 				"name": "SESSION_MANAGER",
-				"class_name": "SessionManager",
-				"script_name": "radar-url-scanner"
+				"class_name": "SessionManager"
 			}
 		]
 	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_classes": ["SessionManager"]
+		}
+	],
 	"workflows": [
 		{
 			"binding": "SCAN_WORKFLOW",
@@ -44,8 +49,8 @@
 		}
 	],
 	"vars": {
-		"CLOUDFLARE_ACCOUNT_ID": "2fa27fc2efb43de71442d46a603cc8d2",
-		"APP_URL": "https://radar-url-scanner.workers.dev"
+		"CLOUDFLARE_ACCOUNT_ID": "904dd3d810f6f1dd3801d8b940bd747a",
+		"APP_URL": "https://radar-scan.acme-studios.org"
 	},
 	"placement": {
 		"mode": "smart"

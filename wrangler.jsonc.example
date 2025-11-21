@@ -31,11 +31,16 @@
 		"bindings": [
 			{
 				"name": "SESSION_MANAGER",
-				"class_name": "SessionManager",
-				"script_name": "radar-url-scanner"
+				"class_name": "SessionManager"
 			}
 		]
 	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_classes": ["SessionManager"]
+		}
+	],
 	"workflows": [
 		{
 			"binding": "SCAN_WORKFLOW",
