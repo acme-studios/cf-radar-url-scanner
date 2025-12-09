@@ -215,7 +215,6 @@ radar-url-scanner/
 - TypeScript
 - Vite 7
 - Tailwind CSS v4
-- Jost font family
 
 **Backend:**
 - Cloudflare Workers
