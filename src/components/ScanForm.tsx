@@ -29,9 +29,10 @@ export function ScanForm({ onSubmit, isSubmitting, error }: ScanFormProps) {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://example.com"
-            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#F6821F] focus:border-[#F6821F] transition-all duration-200"
+            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange focus:border-orange transition-all duration-200"
             disabled={isSubmitting}
           />
+          
         </div>
 
         {error && (
@@ -43,7 +44,7 @@ export function ScanForm({ onSubmit, isSubmitting, error }: ScanFormProps) {
         <Button
           type="submit"
           disabled={isSubmitting}
-          className="w-full h-12 text-base font-bold bg-gradient-to-r from-[#F6821F] to-[#FF9A3C] hover:from-[#E5751A] hover:to-[#F6821F] text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full h-12 text-base font-bold bg-linear-to-r from-orange to-orange-light hover:from-orange-dark hover:to-orange text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isSubmitting ? (
             <span className="flex items-center justify-center gap-2">

@@ -5,15 +5,40 @@ import { isValidUrl, isValidEmail, sanitizeString } from './utils/validation';
 export { SessionManager } from './durable-objects/session-manager';
 export { ScanWorkflow } from './workflows/scan-workflow';
 
-// CORS headers
+// Security and CORS headers
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // TODO: Restrict to your domain in production
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Max-Age': '86400'
 };
 
+// Security headers for all responses
+const securityHeaders = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'SAMEORIGIN', // Allow same-origin framing for PDF preview
+  'X-XSS-Protection': '1; mode=block',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+  // HSTS: Enforce HTTPS for 1 year (only in production)
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload'
+};
+
+// Helper to add security headers to responses
+function addSecurityHeaders(response: Response): Response {
+  const newHeaders = new Headers(response.headers);
+  Object.entries(securityHeaders).forEach(([key, value]) => {
+    newHeaders.set(key, value);
+  });
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: newHeaders
+  });
+}
+
 export default {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     
@@ -27,22 +52,27 @@ export default {
       try {
         // API Routes
         if (url.pathname === '/api/scan' && request.method === 'POST') {
-          return await handleCreateScan(request, env, ctx);
+          return addSecurityHeaders(await handleCreateScan(request, env));
         }
         
         if (url.pathname.startsWith('/api/session/')) {
           const sessionId = url.pathname.split('/')[3];
-          return await handleGetSession(sessionId, env);
+          return addSecurityHeaders(await handleGetSession(sessionId, env));
         }
         
         if (url.pathname.startsWith('/api/download/')) {
           const sessionId = url.pathname.split('/')[3];
-          return await handleDownload(sessionId, env);
+          return addSecurityHeaders(await handleDownload(sessionId, env, false));
+        }
+        
+        if (url.pathname.startsWith('/api/preview/')) {
+          const sessionId = url.pathname.split('/')[3];
+          return addSecurityHeaders(await handleDownload(sessionId, env, true));
         }
         
         if (url.pathname.startsWith('/api/email/') && request.method === 'POST') {
           const sessionId = url.pathname.split('/')[3];
-          return await handleSendEmail(sessionId, env, request);
+          return addSecurityHeaders(await handleSendEmail(sessionId, env, request));
         }
         
         // WebSocket upgrade
@@ -53,10 +83,10 @@ export default {
         
         // Health check
         if (url.pathname === '/api/health') {
-          return Response.json({ status: 'ok', timestamp: Date.now() }, { headers: corsHeaders });
+          return addSecurityHeaders(Response.json({ status: 'ok', timestamp: Date.now() }, { headers: corsHeaders }));
         }
         
-        return Response.json({ error: 'Not found' }, { status: 404, headers: corsHeaders });
+        return addSecurityHeaders(Response.json({ error: 'Not found' }, { status: 404, headers: corsHeaders }));
         
       } catch (error) {
         console.error('Worker error:', error);
@@ -77,8 +107,7 @@ export default {
  */
 async function handleCreateScan(
   request: Request,
-  env: Env,
-  ctx: ExecutionContext
+  env: Env
 ): Promise<Response> {
   try {
     const body = await request.json<{ url: string; email: string }>();
@@ -141,17 +170,40 @@ async function handleCreateScan(
       throw new Error('Failed to initialize session');
     }
     
-    // Trigger workflow (non-blocking)
-    ctx.waitUntil(
-      (async () => {
-        try {
-          await env.SCAN_WORKFLOW.create({ id: sessionId, params: { sessionId } });
-          console.log(`[Worker] Workflow started for session: ${sessionId}`);
-        } catch (error) {
-          console.error(`[Worker] Failed to start workflow:`, error);
-        }
-      })()
-    );
+    // Trigger workflow and store instance ID (fixes race condition)
+    let workflowInstanceId: string | undefined;
+    try {
+      const workflowInstance = await env.SCAN_WORKFLOW.create({ 
+        id: sessionId, 
+        params: { sessionId } 
+      });
+      workflowInstanceId = workflowInstance.id;
+      
+      // Update session with workflow instance ID
+      await sessionDO.fetch('https://do/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflowInstanceId: workflowInstanceId,
+          progressPercent: 0,
+          progressMessage: 'Initializing scan...'
+        })
+      });
+      
+      console.log(`[Worker] Workflow started for session: ${sessionId}, instance: ${workflowInstanceId}`);
+    } catch (error) {
+      console.error(`[Worker] Failed to start workflow:`, error);
+      // Mark session as failed
+      await sessionDO.fetch('https://do/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'failed',
+          error: 'Failed to start scan workflow'
+        })
+      });
+      throw error;
+    }
     
     console.log(`[Worker] Session created successfully: ${sessionId}`);
     
@@ -213,8 +265,9 @@ async function handleGetSession(sessionId: string, env: Env): Promise<Response> 
 
 /**
  * Handle GET /api/download/:sessionId - Download PDF report
+ * Handle GET /api/preview/:sessionId - Preview PDF inline
  */
-async function handleDownload(sessionId: string, env: Env): Promise<Response> {
+async function handleDownload(sessionId: string, env: Env, isPreview: boolean = false): Promise<Response> {
   try {
     if (!sessionId) {
       return new Response('Session ID required', { status: 400 });
@@ -227,12 +280,17 @@ async function handleDownload(sessionId: string, env: Env): Promise<Response> {
       return new Response('Report not found', { status: 404 });
     }
     
-    console.log(`[Worker] Serving PDF download for session: ${sessionId}`);
+    console.log(`[Worker] Serving PDF ${isPreview ? 'preview' : 'download'} for session: ${sessionId}`);
+    
+    // Use 'inline' for preview (shows in browser), 'attachment' for download
+    const disposition = isPreview 
+      ? 'inline'
+      : `attachment; filename="radar-scan-${sessionId}.pdf"`;
     
     return new Response(object.body, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="radar-scan-${sessionId}.pdf"`,
+        'Content-Disposition': disposition,
         'Cache-Control': 'private, max-age=3600',
         ...corsHeaders
       }

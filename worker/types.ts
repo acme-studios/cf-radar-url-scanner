@@ -32,6 +32,11 @@ export interface SessionState {
   ipAddress?: string;
   userAgent?: string;
   country?: string;
+  // Workflow tracking
+  workflowInstanceId?: string;
+  // Progress tracking for live updates
+  progressPercent?: number;
+  progressMessage?: string;
 }
 
 export interface RadarScanResponse {

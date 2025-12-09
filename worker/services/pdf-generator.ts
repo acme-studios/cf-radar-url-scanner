@@ -88,9 +88,9 @@ export async function generatePDFReport(
   drawText('Network Statistics', 16, boldFont);
   yPosition -= 5;
   drawText(`Total Requests: ${scanResult.data.requests?.length || 0}`, 11, regularFont);
-  drawText(`Unique IPs: ${scanResult.stats.uniqIPs}`, 11, regularFont);
-  drawText(`Unique Countries: ${scanResult.stats.uniqCountries}`, 11, regularFont);
-  drawText(`Data Transferred: ${(scanResult.stats.dataLength / 1024).toFixed(2)} KB`, 11, regularFont);
+  drawText(`Unique IPs: ${scanResult.stats?.uniqIPs || 0}`, 11, regularFont);
+  drawText(`Unique Countries: ${scanResult.stats?.uniqCountries || 0}`, 11, regularFont);
+  drawText(`Data Transferred: ${((scanResult.stats?.dataLength || 0) / 1024).toFixed(2)} KB`, 11, regularFont);
   
   // Additional data insights
   if (scanResult.data.cookies && Array.isArray(scanResult.data.cookies)) {

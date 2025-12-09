@@ -35,3 +35,6 @@ reports/
 
 # wrangler.jsonc
 wrangler.jsonc
+
+# project artifacts
+project-artifacts/

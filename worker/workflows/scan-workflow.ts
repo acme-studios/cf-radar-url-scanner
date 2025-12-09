@@ -2,6 +2,8 @@ import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
 import type { WorkflowEvent } from 'cloudflare:workers';
 import type { Env, RadarScanResponse, RadarScanResult, SessionState } from '../types';
 import { generatePDFReport } from '../services/pdf-generator';
+import { retryWithBackoff, isRetryableError } from '../utils/retry';
+import { getUserFriendlyError, formatErrorForLogging } from '../utils/error-messages';
 
 interface ScanParams {
   sessionId: string;
@@ -30,53 +32,89 @@ export class ScanWorkflow extends WorkflowEntrypoint<Env, ScanParams> {
       
       console.log(`[Workflow] Session data fetched for URL: ${sessionState.url}`);
       
-      // Step 2: Submit to Radar API
+      // Update progress: Starting scan
+      await step.do('update progress: starting', async () => {
+        await sessionDO.fetch('https://do/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            progressPercent: 5,
+            progressMessage: 'Submitting URL to Cloudflare Radar...'
+          })
+        });
+      });
+      
+      // Step 2: Submit to Radar API with retry logic
       const radarScan = await step.do<RadarScanResponse>('submit to radar api', async () => {
-        const response = await fetch(
-          `https://api.cloudflare.com/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/urlscanner/v2/scan`,
+        return await retryWithBackoff(
+          async () => {
+            const response = await fetch(
+              `https://api.cloudflare.com/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/urlscanner/v2/scan`,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${this.env.CLOUDFLARE_API_TOKEN}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  url: sessionState.url,
+                  visibility: 'Unlisted'
+                })
+              }
+            );
+            
+            if (!response.ok) {
+              const errorText = await response.text();
+              const error = new Error(`Radar API error (${response.status}): ${errorText}`) as Error & { status: number };
+              error.status = response.status;
+              throw error;
+            }
+            
+            const result = await response.json<RadarScanResponse>();
+            console.log('[Workflow] Radar API response:', JSON.stringify(result));
+            return result;
+          },
           {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${this.env.CLOUDFLARE_API_TOKEN}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              url: sessionState.url,
-              visibility: 'Unlisted'
-            })
+            maxAttempts: 3,
+            initialDelayMs: 2000,
+            maxDelayMs: 10000,
+            retryableErrors: isRetryableError
           }
         );
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Radar API error (${response.status}): ${errorText}`);
-        }
-        
-        const result = await response.json<RadarScanResponse>();
-        console.log('[Workflow] Radar API response:', JSON.stringify(result));
-        return result;
       });
       
       console.log(`[Workflow] Radar scan submitted: ${radarScan.uuid}`);
       
-      // Update session with Radar UUID
+      // Update session with Radar UUID and progress
       await step.do('update session with radar uuid', async () => {
         await sessionDO.fetch('https://do/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             status: 'scanning',
-            radarUuid: radarScan.uuid
+            radarUuid: radarScan.uuid,
+            progressPercent: 15,
+            progressMessage: 'Scan submitted. Waiting for results...'
           })
         });
       });
       
-      // Step 3: Poll for scan results
+      // Step 3: Poll for scan results with adaptive intervals
       const scanResult = (await step.do('poll for scan results', async () => {
-        const maxAttempts = 40; // 10 minutes max (15s intervals)
-        const pollInterval = '15 seconds';
+        const maxAttempts = 40;
         
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          // Update progress during polling
+          const progressPercent = Math.min(15 + Math.floor((attempt / maxAttempts) * 50), 65);
+          await sessionDO.fetch('https://do/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              progressPercent,
+              progressMessage: `Analyzing URL... (${attempt + 1}/${maxAttempts})`
+            })
+          });
+          
           console.log(`[Workflow] Polling attempt ${attempt + 1}/${maxAttempts}`);
           
           const response = await fetch(
@@ -95,7 +133,14 @@ export class ScanWorkflow extends WorkflowEntrypoint<Env, ScanParams> {
           } else if (response.status === 404) {
             // Still processing, wait and retry
             if (attempt < maxAttempts - 1) {
-              await step.sleep('wait for scan', pollInterval);
+              // Use the appropriate sleep duration based on attempt
+              if (attempt < 5) {
+                await step.sleep('wait for scan', '5 seconds');
+              } else if (attempt < 15) {
+                await step.sleep('wait for scan', '10 seconds');
+              } else {
+                await step.sleep('wait for scan', '15 seconds');
+              }
             }
             continue;
           } else {
@@ -112,7 +157,11 @@ export class ScanWorkflow extends WorkflowEntrypoint<Env, ScanParams> {
         await sessionDO.fetch('https://do/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'generating' })
+          body: JSON.stringify({ 
+            status: 'generating',
+            progressPercent: 70,
+            progressMessage: 'Scan complete! Generating PDF report...'
+          })
         });
       });
       
@@ -130,26 +179,38 @@ export class ScanWorkflow extends WorkflowEntrypoint<Env, ScanParams> {
         await sessionDO.fetch('https://do/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'uploading' })
+          body: JSON.stringify({ 
+            status: 'uploading',
+            progressPercent: 85,
+            progressMessage: 'Uploading report to cloud storage...'
+          })
         });
       });
       
-      // Step 7: Upload to R2
+      // Step 7: Upload to R2 with retry logic
       const r2Key = await step.do<string>('upload to r2', async () => {
         const key = `sessions/${sessionId}/report.pdf`;
         
-        await this.env.radar_scan_reports.put(key, pdfBuffer, {
-          httpMetadata: {
-            contentType: 'application/pdf'
+        await retryWithBackoff(
+          async () => {
+            await this.env.radar_scan_reports.put(key, pdfBuffer, {
+              httpMetadata: {
+                contentType: 'application/pdf'
+              },
+              customMetadata: {
+                sessionId: sessionId,
+                url: sessionState.url,
+                createdAt: new Date().toISOString()
+              }
+            });
           },
-          customMetadata: {
-            sessionId: sessionId,
-            email: sessionState.email,
-            url: sessionState.url,
-            scanDate: new Date().toISOString(),
-            radarUuid: radarScan.uuid
+          {
+            maxAttempts: 3,
+            initialDelayMs: 1000,
+            maxDelayMs: 5000,
+            retryableErrors: isRetryableError
           }
-        });
+        );
         
         console.log(`[Workflow] PDF uploaded to R2: ${key}`);
         return key;
@@ -162,7 +223,9 @@ export class ScanWorkflow extends WorkflowEntrypoint<Env, ScanParams> {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             status: 'completed',
-            r2Key: r2Key
+            r2Key: r2Key,
+            progressPercent: 100,
+            progressMessage: 'Scan complete! Your report is ready.'
           })
         });
       });
@@ -170,18 +233,21 @@ export class ScanWorkflow extends WorkflowEntrypoint<Env, ScanParams> {
       console.log(`[Workflow] Scan workflow completed successfully for session: ${sessionId}`);
       
     } catch (error) {
-      console.error(`[Workflow] Error in scan workflow:`, error);
+      // Log technical error details
+      console.error(formatErrorForLogging(error, 'Workflow'));
+      
+      // Get user-friendly error message
+      const friendlyError = getUserFriendlyError(error);
+      const displayMessage = `${friendlyError.title}: ${friendlyError.message}${friendlyError.action ? ' ' + friendlyError.action : ''}`;
       
       // Handle failure - mark as failed
       await step.do('mark failed', async () => {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        
         await sessionDO.fetch('https://do/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             status: 'failed',
-            error: errorMessage
+            error: displayMessage
           })
         });
       });

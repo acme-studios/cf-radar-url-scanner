@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env, SessionState } from '../types';
+import { retryWithBackoff, isRetryableD1Error } from '../utils/retry';
 
 export class SessionManager extends DurableObject<Env> {
   private sessions: Map<WebSocket, { clientId: string }>;
@@ -184,31 +185,48 @@ export class SessionManager extends DurableObject<Env> {
     if (!this.sessionData) return;
     
     try {
-      await this.env.radar_scanner_db.prepare(`
-        INSERT OR REPLACE INTO sessions 
-        (id, url, email, status, job_id, radar_uuid, r2_key, error, 
-         created_at, updated_at, expires_at, ip_address, user_agent, country)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        this.sessionData.sessionId,
-        this.sessionData.url,
-        this.sessionData.email,
-        this.sessionData.status,
-        this.sessionData.jobId || null,
-        this.sessionData.radarUuid || null,
-        this.sessionData.r2Key || null,
-        this.sessionData.error || null,
-        this.sessionData.createdAt,
-        this.sessionData.updatedAt,
-        this.sessionData.expiresAt,
-        this.sessionData.ipAddress || null,
-        this.sessionData.userAgent || null,
-        this.sessionData.country || null
-      ).run();
+      // Retry D1 writes with exponential backoff
+      await retryWithBackoff(
+        async () => {
+          await this.env.radar_scanner_db.prepare(`
+            INSERT OR REPLACE INTO sessions 
+            (id, url, email, status, job_id, radar_uuid, r2_key, error, 
+             created_at, updated_at, expires_at, ip_address, user_agent, country,
+             workflow_instance_id, progress_percent, progress_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            this.sessionData!.sessionId,
+            this.sessionData!.url,
+            this.sessionData!.email,
+            this.sessionData!.status,
+            this.sessionData!.jobId || null,
+            this.sessionData!.radarUuid || null,
+            this.sessionData!.r2Key || null,
+            this.sessionData!.error || null,
+            this.sessionData!.createdAt,
+            this.sessionData!.updatedAt,
+            this.sessionData!.expiresAt,
+            this.sessionData!.ipAddress || null,
+            this.sessionData!.userAgent || null,
+            this.sessionData!.country || null,
+            this.sessionData!.workflowInstanceId || null,
+            this.sessionData!.progressPercent || null,
+            this.sessionData!.progressMessage || null
+          ).run();
+        },
+        {
+          maxAttempts: 3,
+          initialDelayMs: 500,
+          maxDelayMs: 5000,
+          retryableErrors: isRetryableD1Error
+        }
+      );
       
       console.log(`Persisted to D1: ${this.sessionData.sessionId}`);
     } catch (error) {
-      console.error('Failed to persist to D1:', error);
+      console.error('Failed to persist to D1 after retries:', error);
+      // Don't throw - we don't want to break the workflow for D1 failures
+      // Session state is still in memory and will be retried on next update
     }
   }
 

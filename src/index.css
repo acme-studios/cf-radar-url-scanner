@@ -66,12 +66,21 @@ button:disabled, [disabled] {
   50% { box-shadow: 0 0 0 10px rgba(246, 130, 31, 0); }
 }
 
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(100px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.5s ease-out;
 }
 
 .animate-slide-in {
   animation: slideIn 0.5s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out;
 }
 
 .animate-pulse-orange {
