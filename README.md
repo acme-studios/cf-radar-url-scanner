@@ -1,6 +1,6 @@
 # RadarScan
 
-A modern URL security scanner powered by Cloudflare Radar. Scan any URL for security threats, analyze network behavior, and generate comprehensive PDF reports.
+A URL security scanner powered by Cloudflare Radar. Scan any URL for security threats, analyze network behavior, and generate comprehensive PDF reports.
 
 ## Architecture
 
@@ -65,8 +65,6 @@ A modern URL security scanner powered by Cloudflare Radar. Scan any URL for secu
 - Toast notifications for feedback
 - Keyboard shortcuts (Enter to submit, Escape to reset)
 - One-click retry for failed scans
-- Smooth animations throughout
-- Modern, responsive UI with Cloudflare branding
 
 ## Prerequisites
 
@@ -230,75 +228,7 @@ radar-url-scanner/
 - Cloudflare Radar API
 - Resend API
 
-## Security
 
-### Secrets Management
-- All sensitive credentials stored as Wrangler secrets
-- `.dev.vars` for local development only (gitignored)
-- No hardcoded API keys or tokens in code
-
-### Security Headers
-The app includes:
-- CORS headers for API endpoints
-- Content-Type validation
-- Private caching for PDFs
-
-### Best Practices
-- API tokens have minimal required permissions
-- Session IDs are UUIDs (non-guessable)
-- PDF reports cached privately (1 hour)
-- WebSocket connections validated
-
-## Troubleshooting
-
-### Common Issues
-
-**Setup script fails:**
-- Ensure `.dev.vars` exists with all required variables
-- Check Wrangler is authenticated: `npx wrangler whoami`
-- Verify account has Workers/D1/R2 enabled
-
-**WebSocket connection fails:**
-- Check browser console for errors
-- Verify Durable Objects are deployed
-- Try HTTP polling fallback (automatic)
-
-**PDF preview shows blank:**
-- Check browser PDF viewer is enabled
-- Try download instead of preview
-- Verify R2 bucket has the file
-
-**Email delivery fails:**
-- Verify Resend API key is valid
-- Check Resend domain is verified
-- Review worker logs for errors
-
-## Legal & Terms of Service
-
-### Important Notes
-
-This application uses **Cloudflare's Radar URL Scanner API**, a free public service. Before deploying:
-
-1. **Review `TERMS.md`** - Understand legal considerations
-2. **Implement Rate Limiting** - Prevent abuse (see `RATE-LIMITING.md`)
-3. **Add Terms Modal** (Optional) - Use `src/components/TermsModal.tsx` to require user acceptance
-4. **Monitor Usage** - Keep logs and respond to abuse reports
-
-### Is This Legal?
-
-**Yes**, generally:
-- ✅ Cloudflare Radar is a public, free service
-- ✅ Scans are "unlisted" (not publicly indexed)
-- ✅ Security analysis is a legitimate use case
-- ✅ No security measures are being circumvented
-
-**However**:
-- ⚠️ Users must have authorization to scan URLs
-- ⚠️ Implement rate limiting to prevent abuse
-- ⚠️ Have clear terms of service
-- ⚠️ Monitor for abuse and respond to complaints
-
-See `TERMS.md` for detailed legal considerations and recommendations.
 
 ## Contributing
 
