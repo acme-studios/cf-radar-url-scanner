@@ -38,6 +38,7 @@ function addSecurityHeaders(response: Response): Response {
 }
 
 export default {
+  // @ts-expect-error - ctx is required by Workers API but not used
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
